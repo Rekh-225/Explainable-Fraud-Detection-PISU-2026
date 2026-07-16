@@ -1,0 +1,27 @@
+{
+  "validation_average_precision": {
+    "Dummy Prior": 0.001674156313331571,
+    "Logistic Regression": 0.8138795553354512,
+    "Random Forest": 0.8706321252114538
+  },
+  "threshold_selection": {
+    "Dummy Prior": {
+      "threshold": 0.5,
+      "rule": "fixed non-learning reference threshold"
+    },
+    "Logistic Regression": {
+      "threshold": 0.9999999496924593,
+      "rule": "highest precision with validation recall >= 80%",
+      "validation_precision": 0.9130434782608695,
+      "validation_recall": 0.8289473684210527
+    },
+    "Random Forest": {
+      "threshold": 0.6735057931524799,
+      "rule": "highest precision with validation recall >= 80%",
+      "validation_precision": 0.96875,
+      "validation_recall": 0.8157894736842105
+    }
+  },
+  "selected_model": "Random Forest",
+  "selection_rule": "highest validation Average Precision among learned models"
+}

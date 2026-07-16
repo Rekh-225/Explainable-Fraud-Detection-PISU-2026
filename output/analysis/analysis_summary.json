@@ -1,0 +1,123 @@
+{
+  "project_title": "Explainable AI-Powered Fraud Detection and Risk Analytics for Digital Payment Transactions",
+  "data_quality": {
+    "source": "https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud",
+    "openml_data_id": 1597,
+    "source_note": "Authoritative Kaggle CSV with Time, V1-V28, Amount and Class",
+    "original_rows": 284807,
+    "original_columns": 31,
+    "original_class_counts": {
+      "0": 284315,
+      "1": 492
+    },
+    "missing_values": 0,
+    "exact_duplicate_rows_removed": 1081,
+    "cleaned_rows": 283726,
+    "cleaned_class_counts": {
+      "0": 283253,
+      "1": 473
+    },
+    "cleaned_fraud_prevalence": 0.001667101358352777
+  },
+  "splits": {
+    "random_state": 42,
+    "split_method": "stratified random 64/16/20 train-validation-test",
+    "train": {
+      "rows": 181584,
+      "fraud": 302,
+      "rate": 0.0016631421270596528
+    },
+    "validation": {
+      "rows": 45396,
+      "fraud": 76,
+      "rate": 0.001674156313331571
+    },
+    "test": {
+      "rows": 56746,
+      "fraud": 95,
+      "rate": 0.0016741268107003137
+    },
+    "index_overlap": {
+      "train_validation": 0,
+      "train_test": 0,
+      "validation_test": 0
+    }
+  },
+  "selected_model": "Random Forest",
+  "selected_threshold": 0.6735057931524799,
+  "selected_model_test_metrics": {
+    "model": "Random Forest",
+    "policy": "validation_operating_point",
+    "threshold": 0.6735057931524799,
+    "precision": 0.9565217391304348,
+    "recall": 0.6947368421052632,
+    "f1": 0.8048780487804879,
+    "average_precision": 0.8050052719034434,
+    "roc_auc": 0.9652098862007361,
+    "true_negatives": 56648,
+    "false_positives": 3,
+    "false_negatives": 29,
+    "true_positives": 66,
+    "false_positives_per_1000_legitimate": 0.05295581719651903,
+    "alert_rate": 0.0012159447361928593,
+    "test_rows": 56746,
+    "test_fraud_cases": 95
+  },
+  "top_random_forest_features": [
+    {
+      "feature": "V14",
+      "importance": 0.17880688856810076
+    },
+    {
+      "feature": "V10",
+      "importance": 0.1168079248718103
+    },
+    {
+      "feature": "V4",
+      "importance": 0.11300447907077903
+    },
+    {
+      "feature": "V12",
+      "importance": 0.10407502299193165
+    },
+    {
+      "feature": "V17",
+      "importance": 0.09613199261391468
+    },
+    {
+      "feature": "V3",
+      "importance": 0.06795964882758442
+    },
+    {
+      "feature": "V16",
+      "importance": 0.05444106680730755
+    },
+    {
+      "feature": "V11",
+      "importance": 0.04435997535797668
+    },
+    {
+      "feature": "V2",
+      "importance": 0.030022174009011172
+    },
+    {
+      "feature": "V21",
+      "importance": 0.021066600671126864
+    }
+  ],
+  "model_selection_basis": "validation Average Precision",
+  "threshold_policy": {
+    "threshold": 0.6735057931524799,
+    "rule": "highest precision with validation recall >= 80%",
+    "validation_precision": 0.96875,
+    "validation_recall": 0.8157894736842105
+  },
+  "limitations": [
+    "The transactions cover only two days in September 2013.",
+    "V1-V28 are anonymized PCA components without business-semantic labels.",
+    "Time records elapsed seconds from the first transaction, not calendar timestamps or local time.",
+    "A stratified random split does not simulate future fraud drift.",
+    "The dataset contains no reliable investigation-cost or fraud-loss matrix.",
+    "This is an offline academic prototype, not a production payment control."
+  ]
+}
