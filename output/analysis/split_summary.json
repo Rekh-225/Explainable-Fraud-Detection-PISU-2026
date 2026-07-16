@@ -1,0 +1,24 @@
+{
+  "random_state": 42,
+  "split_method": "stratified random 64/16/20 train-validation-test",
+  "train": {
+    "rows": 181584,
+    "fraud": 302,
+    "rate": 0.0016631421270596528
+  },
+  "validation": {
+    "rows": 45396,
+    "fraud": 76,
+    "rate": 0.001674156313331571
+  },
+  "test": {
+    "rows": 56746,
+    "fraud": 95,
+    "rate": 0.0016741268107003137
+  },
+  "index_overlap": {
+    "train_validation": 0,
+    "train_test": 0,
+    "validation_test": 0
+  }
+}

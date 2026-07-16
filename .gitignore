@@ -1,0 +1,21 @@
+﻿# Raw or cached data
+data/raw/
+data/cache/
+
+# Trained models and temporary files
+output/analysis/models/
+output/analysis/figures_bw/
+tmp/
+__pycache__/
+*.pyc
+~$*.docx
+.venv/
+
+# Internal report-generation material and previous drafts
+output/report/
+output/pdf/
+output/LinkedIn_CV_Positioning.md
+src/build_report*.py
+src/polish_report.py
+src/refresh_figures.py
+src/make_contact_sheet.py

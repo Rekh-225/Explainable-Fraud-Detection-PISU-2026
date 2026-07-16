@@ -1,0 +1,19 @@
+{
+  "source": "https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud",
+  "openml_data_id": 1597,
+  "source_note": "Authoritative Kaggle CSV with Time, V1-V28, Amount and Class",
+  "original_rows": 284807,
+  "original_columns": 31,
+  "original_class_counts": {
+    "0": 284315,
+    "1": 492
+  },
+  "missing_values": 0,
+  "exact_duplicate_rows_removed": 1081,
+  "cleaned_rows": 283726,
+  "cleaned_class_counts": {
+    "0": 283253,
+    "1": 473
+  },
+  "cleaned_fraud_prevalence": 0.001667101358352777
+}
