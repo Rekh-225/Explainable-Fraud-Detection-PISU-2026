@@ -24,3 +24,7 @@ src/build_report*.py
 src/polish_report.py
 src/refresh_figures.py
 src/make_contact_sheet.py
+
+# Local UI demo runs and exports
+output/ui_demo/
+output/ui_exports/

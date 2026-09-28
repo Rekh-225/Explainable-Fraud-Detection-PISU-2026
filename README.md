@@ -225,11 +225,23 @@ fraud-pipeline verify-run output/runs/<run_id>      # re-hash artifacts against 
 
 `python -m fraud_pipeline ...` is equivalent to `fraud-pipeline ...`.
 
+### 7. Local interface (optional)
+
+```bash
+streamlit run src/fraud_pipeline/ui/app.py
+```
+
+A local Streamlit interface with three non-overlapping modes: **Historical Results** (the committed artifacts above, with their missing provenance listed), **Synthetic Demo** (a run on a generated fixture, trained once and clearly labelled synthetic) and **Reproduced Experiment** (a verified `output/runs/<run_id>` with its manifest). It offers a validation-only threshold explorer with review-capacity scenarios, a frozen test-result display, a simulated review queue with analyst annotations kept apart from labels, an optional hypothetical cost scenario, and report/configuration exports. See [docs/ui_guide.md](docs/ui_guide.md), the [model card](docs/model_card.md) and the [example synthetic report](docs/example_report_synthetic.md).
+
+<p align="center">
+  <img src="docs/screenshots/reproduced_threshold_explorer.png" width="70%" alt="Threshold explorer on validation predictions of the reproduced run">
+</p>
+
 ### Reproduction status
 
 | Item | Status |
 |---|---|
-| Synthetic tests and CI | Passing (67 tests) |
+| Synthetic tests and CI | Passing (105 tests, including UI core and headless app tests) |
 | Full Kaggle reproduction (`reproduce-historical`) | Completed locally on 2026-09-27 against `creditcard.csv` with SHA-256 `76274b69…551a89`, Python 3.13.14, scikit-learn 1.9.0. Thresholds (LR 0.9999999496924593, RF 0.6735057931524799), validation Average Precision, test confusion matrices, split sizes, duplicate counts (1,081) and Random Forest feature importances are identical to `output/analysis/`. The run directory is not committed (`output/runs/` is git-ignored) |
 
 ## Repository structure
@@ -255,7 +267,9 @@ fraud-pipeline verify-run output/runs/<run_id>      # re-hash artifacts against 
 |       |-- manifest.py             run manifest + artifact checksums
 |       |-- artifacts.py            checksum-bound model bundles
 |       |-- pipeline.py             orchestration
-|       `-- cli.py                  fraud-pipeline command
+|       |-- cli.py                  fraud-pipeline command
+|       `-- ui/                     Streamlit interface (core.py calculations, app.py layout)
+|-- docs/                           UI guide, model card, example report, screenshots
 |-- tests/
 |-- output/
 |   |-- analysis/                   frozen historical results (July 2026)
@@ -273,6 +287,7 @@ fraud-pipeline verify-run output/runs/<run_id>      # re-hash artifacts against 
 | Data processing | pandas, NumPy |
 | Machine learning | scikit-learn |
 | Visualization | Matplotlib, seaborn |
+| Local interface | Streamlit (offline, no telemetry) |
 | Model persistence | joblib |
 | Data sources | Kaggle (historical experiment); OpenML mirror accepted only when declared explicitly |
 | Outputs | JSON, CSV, PNG, PDF, DOCX |

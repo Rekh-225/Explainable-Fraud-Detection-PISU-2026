@@ -1,0 +1,31 @@
+{
+  "exported_at_utc": "2026-09-28T13:42:51+00:00",
+  "ui_version": "0.2.0",
+  "mode": "Synthetic Demo",
+  "run_id": "synthetic_demo_rows6000_seed2026",
+  "run_dir": "C:\\Users\\rehan\\Documents\\Rehan_Report_DX_PISU_2926\\output\\ui_demo\\runs\\synthetic_demo_rows6000_seed2026",
+  "dataset_source": "synthetic",
+  "dataset_sha256": "d0d6bcb1c5242f89b28bcba17e8037654304ff2a0c402e6f4fec520d5346deca",
+  "synthetic": true,
+  "explored_model": "Logistic Regression",
+  "explored_validation_threshold": 0.9462303966088328,
+  "validation_selected_threshold": 0.9462303966088328,
+  "review_capacities": [
+    10,
+    25,
+    50,
+    100
+  ],
+  "cost_scenario_inputs": {
+    "review_cost_per_alert": 5.0,
+    "loss_per_missed_fraud": 200.0,
+    "recovered_per_caught_fraud": 150.0,
+    "currency": "hypothetical units"
+  },
+  "annotation_counts": {
+    "confirmed_fraud": 1,
+    "legitimate": 0,
+    "escalate": 0
+  },
+  "note": "Explored thresholds are validation-only explorations; they do not re-validate the model or alter the frozen test result."
+}
