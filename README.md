@@ -12,7 +12,7 @@ An auditable machine-learning study that turns highly imbalanced transaction dat
 [![PISU](https://img.shields.io/badge/PISU-2026-C9323B)](https://uni-pr.edu/)
 
 [Read the report](report/Rehan_Khaliq_Fraud_Detection_Report_FINAL.pdf) ·
-[Explore the analysis](src/run_analysis.py) ·
+[Explore the pipeline](src/fraud_pipeline/) ·
 [Review the results](output/analysis/analysis_summary.json) ·
 [Access the dataset](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud)
 
@@ -62,13 +62,14 @@ The report extends this cycle into a possible multi-agent pipeline containing da
 
 | Layer | Responsibility | Repository status |
 |---|---|---|
-| Data ingestion | Load the authoritative Kaggle CSV or retrieve OpenML data ID 1597 | Implemented |
-| Data quality | Validate schema and types, identify missing values, remove exact duplicates | Implemented |
-| Data partitioning | Create stratified 64/16/20 train-validation-test partitions | Implemented |
+| Data ingestion | Load an explicitly declared dataset file (Kaggle CSV, OpenML mirror, or synthetic fixture); no silent substitution | Implemented |
+| Data quality | Validate schema, numeric and finite values, binary labels, class counts; remove exact duplicates | Implemented, tested |
+| Data partitioning | Create stratified 64/16/20 train-validation-test partitions with membership fingerprints | Implemented, tested |
 | Model training | Compare Dummy Prior, class-weighted Logistic Regression, and Random Forest | Implemented |
 | Model selection | Select the learned model using validation Average Precision | Implemented |
 | Decision policy | Select the highest-precision validation threshold achieving at least 80% recall | Implemented offline |
 | Explainability | Export Random Forest feature importance for anonymized PCA features | Implemented, limited |
+| Reproducibility | Per-run manifest (dataset checksum, feature order, split fingerprints, model config, environment, artifact checksums), checksum-bound model bundles, synthetic-data CI | Implemented, tested |
 | Operational response | Allow, challenge, block, alert, or escalate transactions | Conceptual |
 | Multi-agent orchestration | Coordinate specialist agents and human review through the OODA loop | Conceptual |
 
@@ -104,6 +105,8 @@ Uses standardized features and balanced class weights. It provides a strong, int
 Uses 200 trees, balanced subsampling, bounded depth, minimum leaf-size regularization, and square-root feature sampling. It captures nonlinear relationships while remaining practical to audit and reproduce.
 
 ## Verified test results
+
+These are the historical results of the original experiment (July 2026), frozen under `output/analysis/`. They were re-derived bit-for-bit by the refactored pipeline on 2026-09-27; see [Reproduction status](#reproduction-status).
 
 The **Random Forest** achieved the highest validation Average Precision among the learned models. Its operating threshold of **0.6735** was selected using validation data only.
 
@@ -166,50 +169,111 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. Install the pinned dependencies
+### 3. Install the pinned dependencies and the package
 
 ```bash
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-dev.txt -e .
 ```
 
-### 4. Provide the dataset
+`requirements.txt` pins the direct dependencies (Python 3.12 or 3.13); `requirements-dev.txt` adds pytest; `requirements.lock.txt` is the fully resolved environment (`pip freeze`) that the tests and the 2026-09-27 reproduction were verified with. Use `pip install -r requirements.lock.txt -e .` for an exact replica.
 
-Preferred option: download `creditcard.csv` from the [ULB Credit Card Fraud dataset on Kaggle](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) and place it at:
+### 4. Run the tests (no dataset or network needed)
+
+```bash
+pytest -q
+```
+
+The tests use deterministic synthetic fixtures (`fraud_pipeline.synthetic`) and cover schema rejection, label validation, non-finite input, de-duplication, disjoint splits, train-only preprocessing, threshold edge cases, metric arithmetic, manifest generation, artifact integrity, and a tiny end-to-end run. The same suite runs in CI (`.github/workflows/ci.yml`) together with a synthetic smoke run.
+
+### 5. Provide the dataset (for the full experiment only)
+
+Download `creditcard.csv` from the [ULB Credit Card Fraud dataset on Kaggle](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) (login required) and place it at:
 
 ```text
 data/raw/creditcardfraud/creditcard.csv
 ```
 
-If the CSV is not present, the program attempts to retrieve the OpenML mirror using **data ID 1597**.
+The file is never downloaded automatically and no other source is substituted. Raw data is excluded from Git because of repository size and responsible data-distribution practices.
 
-Raw data is excluded from Git because of repository size and responsible data-distribution practices.
+> **Kaggle vs. OpenML.** The Kaggle release contains `Time` (seconds since the first transaction), `V1`-`V28`, `Amount`, `Class`. The OpenML mirror (data ID 1597) **omits `Time`**. Because `Time` is one of the 30 model inputs in the historical experiment, an OpenML run has a different feature schema and its results are **not comparable** to the numbers above. `--source kaggle` therefore rejects a file without `Time`; `--source openml` accepts it and records the difference in the manifest.
 
-### 5. Run the complete pipeline
+### 6. Re-run the historical experiment (explicit local command)
 
 ```bash
-python src/run_analysis.py
+fraud-pipeline reproduce-historical          # or: python src/run_analysis.py
 ```
 
-The program regenerates the metrics, JSON summaries, CSV tables, figures, and serialized selected model under `output/analysis/`.
+Equivalent to the original `python src/run_analysis.py` (seed 42, exact-duplicate removal, stratified 64/16/20 split, Dummy Prior / Logistic Regression / Random Forest with 200 trees, validation-only model and threshold selection). It takes about five minutes on one core. Full retraining is deliberately **not** part of CI.
+
+Each run writes to a new directory `output/runs/<run_id>/` (never overwriting `output/analysis/`), containing the same tables and figures as the historical run plus:
+
+| Artifact | Purpose |
+|---|---|
+| `run_manifest.json` | Dataset path/source/SHA-256, feature order, row and class counts, duplicate policy, split seed and per-split membership fingerprints, model configuration, threshold policy, Python and package versions, git commit, SHA-256 of every artifact |
+| `validation_scores.csv` | Row-level validation scores and flags per model with `row_id` (position in the source CSV), `split`, and `label`, for the upcoming UI milestone. Test-set scores are intentionally not exported |
+| `models/selected_model.joblib` + `selected_model.schema.json` | Selected model bound to its feature order, threshold and run id; `fraud_pipeline.artifacts.load_model_bundle` refuses to unpickle unless the digest matches the sidecar and the manifest |
+| `model_comparison.csv` | As before, plus `pr_auc_trapezoidal` reported separately from `average_precision` (they are different PR-curve summaries; model selection uses Average Precision) |
+
+Other commands:
+
+```bash
+fraud-pipeline run --dataset PATH --source kaggle|openml|synthetic [--seed 42 --minimum-recall 0.8 --duplicate-policy drop_exact|keep --rf-estimators 200 --run-id ID --no-figures]
+fraud-pipeline synthetic --output data/synthetic.csv --rows 4000 --seed 0 --duplicates 25 [--no-time]
+fraud-pipeline verify-run output/runs/<run_id>      # re-hash artifacts against the manifest
+```
+
+`python -m fraud_pipeline ...` is equivalent to `fraud-pipeline ...`.
+
+### 7. Local interface (optional)
+
+```bash
+streamlit run src/fraud_pipeline/ui/app.py
+```
+
+A local Streamlit interface with three non-overlapping modes: **Historical Results** (the committed artifacts above, with their missing provenance listed), **Synthetic Demo** (a run on a generated fixture, trained once and clearly labelled synthetic) and **Reproduced Experiment** (a verified `output/runs/<run_id>` with its manifest). It offers a validation-only threshold explorer with review-capacity scenarios, a frozen test-result display, a simulated review queue with analyst annotations kept apart from labels, an optional hypothetical cost scenario, and report/configuration exports. See [docs/ui_guide.md](docs/ui_guide.md), the [model card](docs/model_card.md) and the [example synthetic report](docs/example_report_synthetic.md).
+
+<p align="center">
+  <img src="docs/screenshots/reproduced_threshold_explorer.png" width="70%" alt="Threshold explorer on validation predictions of the reproduced run">
+</p>
+
+### Reproduction status
+
+| Item | Status |
+|---|---|
+| Synthetic tests and CI | Passing (105 tests, including UI core and headless app tests) |
+| Full Kaggle reproduction (`reproduce-historical`) | Completed locally on 2026-09-27 against `creditcard.csv` with SHA-256 `76274b69…551a89`, Python 3.13.14, scikit-learn 1.9.0. Thresholds (LR 0.9999999496924593, RF 0.6735057931524799), validation Average Precision, test confusion matrices, split sizes, duplicate counts (1,081) and Random Forest feature importances are identical to `output/analysis/`. The run directory is not committed (`output/runs/` is git-ignored) |
 
 ## Repository structure
 
 ```text
 .
 |-- README.md
-|-- requirements.txt
+|-- pyproject.toml                  package + pytest configuration
+|-- requirements.txt                pinned direct dependencies
+|-- requirements-dev.txt            + pytest
+|-- requirements.lock.txt           fully resolved environment
+|-- .github/workflows/ci.yml        tests + synthetic smoke run
 |-- src/
-|   `-- run_analysis.py
+|   |-- run_analysis.py             compatibility entry point (= reproduce-historical)
+|   `-- fraud_pipeline/
+|       |-- data.py                 loading, schema validation, duplicate policy
+|       |-- synthetic.py            deterministic fixtures
+|       |-- splitting.py            stratified split + membership fingerprints
+|       |-- modeling.py             model definitions (train-only fitting)
+|       |-- thresholds.py           validation-only operating threshold policy
+|       |-- evaluation.py           metrics (AP vs trapezoidal PR-AUC kept distinct)
+|       |-- reporting.py            figures, tables, validation-score export
+|       |-- manifest.py             run manifest + artifact checksums
+|       |-- artifacts.py            checksum-bound model bundles
+|       |-- pipeline.py             orchestration
+|       |-- cli.py                  fraud-pipeline command
+|       `-- ui/                     Streamlit interface (core.py calculations, app.py layout)
+|-- docs/                           UI guide, model card, example report, screenshots
+|-- tests/
 |-- output/
-|   `-- analysis/
-|       |-- figures/
-|       |-- analysis_summary.json
-|       |-- data_quality.json
-|       |-- feature_importance.csv
-|       |-- model_comparison.csv
-|       |-- split_summary.json
-|       `-- validation_summary.json
+|   |-- analysis/                   frozen historical results (July 2026)
+|   `-- runs/<run_id>/              new runs (git-ignored)
 `-- report/
     |-- Rehan_Khaliq_Fraud_Detection_Report_FINAL.pdf
     `-- Rehan_Khaliq_Fraud_Detection_Report_FINAL.docx
@@ -219,12 +283,13 @@ The program regenerates the metrics, JSON summaries, CSV tables, figures, and se
 
 | Category | Tools |
 |---|---|
-| Language | Python 3.12 |
+| Language | Python 3.12 / 3.13 |
 | Data processing | pandas, NumPy |
 | Machine learning | scikit-learn |
 | Visualization | Matplotlib, seaborn |
+| Local interface | Streamlit (offline, no telemetry) |
 | Model persistence | joblib |
-| Data sources | Kaggle, OpenML |
+| Data sources | Kaggle (historical experiment); OpenML mirror accepted only when declared explicitly |
 | Outputs | JSON, CSV, PNG, PDF, DOCX |
 
 ## Responsible interpretation
