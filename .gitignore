@@ -5,9 +5,14 @@ data/cache/
 # Trained models and temporary files
 output/analysis/models/
 output/analysis/figures_bw/
+# New pipeline runs (each run writes its own manifest-bearing directory)
+output/runs/
+ci/
 tmp/
 __pycache__/
 *.pyc
+.pytest_cache/
+*.egg-info/
 ~$*.docx
 .venv/
 

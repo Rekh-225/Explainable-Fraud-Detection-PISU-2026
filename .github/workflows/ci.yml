@@ -1,0 +1,46 @@
+name: CI
+
+# Runs the unit tests and a small synthetic end-to-end pipeline. The full
+# historical retraining on the Kaggle CSV is an explicit local command
+# (`fraud-pipeline reproduce-historical`) and is intentionally not part of CI:
+# the dataset is licence-restricted and not stored in the repository.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt -e .
+      - name: Unit and end-to-end tests (synthetic data only)
+        run: pytest -q
+      - name: Synthetic pipeline smoke run
+        run: |
+          fraud-pipeline synthetic --output ci/synthetic.csv --rows 3000 --seed 7 --duplicates 20
+          fraud-pipeline run --dataset ci/synthetic.csv --source synthetic \
+            --output-root ci/runs --run-id ci-smoke --rf-estimators 20
+          fraud-pipeline verify-run ci/runs/ci-smoke
+      - name: Upload synthetic run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-run-py${{ matrix.python-version }}
+          path: ci/runs/ci-smoke
+          retention-days: 7
