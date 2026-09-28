@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fraud-pipeline"
+version = "0.2.0"
+description = "Reproducible, testable fraud-detection analysis pipeline for the PISU 2026 report."
+requires-python = ">=3.12"
+# Runtime dependencies are pinned in requirements.txt (repository convention).
+dependencies = []
+
+[project.scripts]
+fraud-pipeline = "fraud_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+filterwarnings = ["error::DeprecationWarning:fraud_pipeline.*"]
