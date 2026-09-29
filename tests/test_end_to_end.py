@@ -43,6 +43,7 @@ EXPECTED_FILES = {
     "validation_scores.csv",
     "models/selected_model.joblib",
     "models/selected_model.schema.json",
+    "models/logistic_regression_linear.json",
     MANIFEST_NAME,
 }
 
@@ -50,7 +51,7 @@ EXPECTED_FILES = {
 def test_all_artifacts_written_and_manifest_verifies(run):
     present = {p.relative_to(run.run_dir).as_posix() for p in run.run_dir.rglob("*") if p.is_file()}
     assert EXPECTED_FILES <= present
-    assert verify_run(run.run_dir) == {"missing": [], "unexpected": [], "modified": []}
+    assert verify_run(run.run_dir) == {"missing": [], "unexpected": [], "modified": [], "unlisted_required": []}
     assert set(run.manifest["artifacts"]) == present - {MANIFEST_NAME}
 
 
@@ -63,6 +64,7 @@ def test_manifest_contents(run):
         "policy": "drop_exact",
         "definition": "exact match on all retained feature columns and Class; first occurrence kept",
         "rows_removed": 9,
+        "rows_retained": 0,
     }
     assert m["features"][0] == "Time" and len(m["features"]) == 30
     assert set(m["dataset"]["class_counts_after_duplicate_policy"]) == {"0", "1"}
@@ -108,8 +110,13 @@ def test_thresholds_come_from_validation_not_test(run):
         assert decision["threshold"] == run.thresholds[name]
 
 
+def test_model_bundle_requires_explicit_trust_opt_in(run):
+    with pytest.raises(ArtifactIntegrityError, match="trusted_source=True"):
+        load_model_bundle(run.run_dir)
+
+
 def test_model_bundle_round_trip_and_schema_binding(run):
-    bundle = load_model_bundle(run.run_dir)
+    bundle = load_model_bundle(run.run_dir, trusted_source=True)
     assert bundle.model_name == run.selected_model
     assert bundle.features == run.dataset.features
     assert bundle.run_id == "e2e"
@@ -127,7 +134,7 @@ def test_tampered_model_artifact_is_refused(run, tmp_path):
     model_path = copy / "models" / "selected_model.joblib"
     model_path.write_bytes(model_path.read_bytes() + b"\x00")
     with pytest.raises(ArtifactIntegrityError, match="digest"):
-        load_model_bundle(copy)
+        load_model_bundle(copy, trusted_source=True)
     report = verify_run(copy)
     assert report["modified"] == ["models/selected_model.joblib"]
 
@@ -136,7 +143,7 @@ def test_bare_joblib_without_schema_is_refused(tmp_path):
     (tmp_path / "models").mkdir()
     (tmp_path / "models" / "selected_model.joblib").write_bytes(b"not a trusted pickle")
     with pytest.raises(ArtifactIntegrityError, match="only bundles written by fraud_pipeline"):
-        load_model_bundle(tmp_path)
+        load_model_bundle(tmp_path, trusted_source=True)
 
 
 def test_runs_are_never_overwritten(run):
@@ -192,10 +199,11 @@ def test_cli_reproduce_historical_fails_clearly_without_dataset(tmp_path, capsys
     assert "OpenML mirror is NOT substituted" in capsys.readouterr().err
 
 
-def test_cli_run_rejects_openml_layout_declared_as_kaggle(tmp_path):
-    from fraud_pipeline.data import SchemaError
+def test_cli_run_rejects_openml_layout_declared_as_kaggle(tmp_path, capsys):
     from fraud_pipeline.synthetic import write_synthetic_csv
 
     csv = write_synthetic_csv(tmp_path / "openml_like.csv", n_rows=300, seed=2, include_time=False)
-    with pytest.raises(SchemaError, match="requires the Time column"):
-        main(["run", "--dataset", str(csv), "--source", "kaggle", "--output-root", str(tmp_path / "runs"), "--no-figures"])
+    code = main(["run", "--dataset", str(csv), "--source", "kaggle", "--output-root", str(tmp_path / "runs"), "--no-figures"])
+    assert code == 2
+    assert "requires the Time column" in capsys.readouterr().err
+    assert not (tmp_path / "runs").exists() or not any((tmp_path / "runs").iterdir())

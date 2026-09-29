@@ -51,6 +51,24 @@ class SplitResult:
             "validation_test": len(ids["validation"] & ids["test"]),
         }
 
+    def content_overlap(self) -> dict[str, int]:
+        """Exact-content (features + label) groups that appear in more than one split.
+
+        Row-id overlap is zero by construction; this metric catches identical
+        observations that entered the data as separate rows (duplicate policy
+        ``keep``) and would otherwise be evaluated as independent.
+        """
+        frames = []
+        for split in self:
+            content = pd.util.hash_pandas_object(split.X.assign(**{"__y": split.y.to_numpy()}), index=False)
+            frames.append(pd.DataFrame({"content": content.to_numpy(), "split": split.name}))
+        table = pd.concat(frames, ignore_index=True)
+        splits_per_content = table.groupby("content")["split"].nunique()
+        return {
+            "duplicate_content_groups_crossing_splits": int((splits_per_content > 1).sum()),
+            "max_splits_for_identical_content": int(splits_per_content.max()) if len(splits_per_content) else 0,
+        }
+
     def summary(self) -> dict[str, Any]:
         summary: dict[str, Any] = {
             "random_state": self.seed,
@@ -68,6 +86,7 @@ class SplitResult:
                 "rate": float(split.y.mean()),
             }
         summary["index_overlap"] = self.overlaps()
+        summary["content_overlap"] = self.content_overlap()
         summary["membership_fingerprints_sha256"] = self.fingerprints()
         return summary
 

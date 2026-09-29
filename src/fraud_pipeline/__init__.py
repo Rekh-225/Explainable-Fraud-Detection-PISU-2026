@@ -5,4 +5,4 @@ modules (loading, validation, splitting, modelling, threshold selection,
 evaluation, reporting, manifest) without changing the experiment itself.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

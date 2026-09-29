@@ -1,5 +1,6 @@
 # Fully resolved environment (pip freeze) verified on Windows / CPython 3.13.14 on 2026-09-28.
-# Direct dependencies are pinned in requirements.txt; install this file for an exact replica:
+# Direct dependencies are pinned in requirements.txt (core), requirements-ui.txt (+streamlit)
+# and requirements-dev.txt (+pytest); install this file for an exact replica of the test environment:
 #   pip install -r requirements.lock.txt -e .
 altair==6.3.0
 anyio==4.15.1

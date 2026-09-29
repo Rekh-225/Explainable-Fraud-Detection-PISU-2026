@@ -69,7 +69,7 @@ The report extends this cycle into a possible multi-agent pipeline containing da
 | Model selection | Select the learned model using validation Average Precision | Implemented |
 | Decision policy | Select the highest-precision validation threshold achieving at least 80% recall | Implemented offline |
 | Explainability | Export Random Forest feature importance for anonymized PCA features | Implemented, limited |
-| Reproducibility | Per-run manifest (dataset checksum, feature order, split fingerprints, model config, environment, artifact checksums), checksum-bound model bundles, synthetic-data CI | Implemented, tested |
+| Reproducibility | Per-run manifest (dataset checksum, feature order, split fingerprints, content-overlap check, model config, environment, artifact checksums), non-executable Logistic Regression coefficient export, synthetic-data CI. Checksums establish integrity, not authenticity; the UI verifies content on every rerun, cross-checks files against each other, classifies provenance from evidence and never unpickles models | Implemented, tested |
 | Operational response | Allow, challenge, block, alert, or escalate transactions | Conceptual |
 | Multi-agent orchestration | Coordinate specialist agents and human review through the OODA loop | Conceptual |
 
@@ -106,7 +106,7 @@ Uses 200 trees, balanced subsampling, bounded depth, minimum leaf-size regulariz
 
 ## Verified test results
 
-These are the historical results of the original experiment (July 2026), frozen under `output/analysis/`. They were re-derived bit-for-bit by the refactored pipeline on 2026-09-27; see [Reproduction status](#reproduction-status).
+These are the historical results of the original experiment (July 2026), frozen under `output/analysis/`. They were re-derived by the refactored pipeline on 2026-09-27 and again on 2026-09-28 with every compared value exactly equal; see [Reproduction status](#reproduction-status).
 
 The **Random Forest** achieved the highest validation Average Precision among the learned models. Its operating threshold of **0.6735** was selected using validation data only.
 
@@ -176,7 +176,7 @@ python -m pip install --upgrade pip
 pip install -r requirements-dev.txt -e .
 ```
 
-`requirements.txt` pins the direct dependencies (Python 3.12 or 3.13); `requirements-dev.txt` adds pytest; `requirements.lock.txt` is the fully resolved environment (`pip freeze`) that the tests and the 2026-09-27 reproduction were verified with. Use `pip install -r requirements.lock.txt -e .` for an exact replica.
+`pyproject.toml` declares the pinned core dependencies (identical to `requirements.txt`; Python 3.12 or 3.13) plus two extras: `ui` (Streamlit, = `requirements-ui.txt`) and `dev` (pytest, = `requirements-dev.txt`). `pip install .` alone therefore yields a working `fraud-pipeline` CLI; `pip install ".[ui]"` adds the interface. `requirements.lock.txt` is the fully resolved environment (`pip freeze`) the tests and reproductions were verified with; use `pip install -r requirements.lock.txt -e .` for an exact replica.
 
 ### 4. Run the tests (no dataset or network needed)
 
@@ -212,26 +212,31 @@ Each run writes to a new directory `output/runs/<run_id>/` (never overwriting `o
 |---|---|
 | `run_manifest.json` | Dataset path/source/SHA-256, feature order, row and class counts, duplicate policy, split seed and per-split membership fingerprints, model configuration, threshold policy, Python and package versions, git commit, SHA-256 of every artifact |
 | `validation_scores.csv` | Row-level validation scores and flags per model with `row_id` (position in the source CSV), `split`, and `label`, for the upcoming UI milestone. Test-set scores are intentionally not exported |
-| `models/selected_model.joblib` + `selected_model.schema.json` | Selected model bound to its feature order, threshold and run id; `fraud_pipeline.artifacts.load_model_bundle` refuses to unpickle unless the digest matches the sidecar and the manifest |
+| `models/selected_model.joblib` + `selected_model.schema.json` | Selected model bound to its feature order, threshold and run id. Loading requires `load_model_bundle(run_dir, trusted_source=True)` - an explicit assertion that you produced the run; digests detect corruption but do not authenticate a foreign bundle. The UI never loads it |
+| `models/logistic_regression_linear.json` | Validated numeric description (feature order, scaler mean/scale, coefficients, intercept) of the Logistic Regression pipeline; the only source of local explanations in the UI |
 | `model_comparison.csv` | As before, plus `pr_auc_trapezoidal` reported separately from `average_precision` (they are different PR-curve summaries; model selection uses Average Precision) |
 
 Other commands:
 
 ```bash
-fraud-pipeline run --dataset PATH --source kaggle|openml|synthetic [--seed 42 --minimum-recall 0.8 --duplicate-policy drop_exact|keep --rf-estimators 200 --run-id ID --no-figures]
+fraud-pipeline run --dataset PATH --source kaggle|openml|synthetic [--seed 42 --minimum-recall 0.8 --duplicate-policy drop_exact|keep --rf-estimators 200 --run-id ID --no-figures --workspace-root DIR --output-root DIR --max-dataset-bytes N --max-dataset-rows N]
 fraud-pipeline synthetic --output data/synthetic.csv --rows 4000 --seed 0 --duplicates 25 [--no-time]
 fraud-pipeline verify-run output/runs/<run_id>      # re-hash artifacts against the manifest
 ```
+
+Paths: defaults are resolved from the **workspace root** - `--workspace-root`, else `$FRAUD_PIPELINE_ROOT`, else the current directory - so an installed wheel run from another folder writes to `<that folder>/output/runs`, never into `site-packages`. `--run-id` must be a single filename-safe component (`A-Za-z0-9._-`); traversal, separators, drive letters and reserved names are rejected and the resolved directory must stay inside `--output-root`. Datasets are refused above `--max-dataset-bytes` (default 2 GiB) before parsing and above `--max-dataset-rows` (default 5,000,000) during parsing. `--duplicate-policy keep` is accepted only when the input contains no exact duplicates: retained duplicates would be split across train/validation/test and evaluated as independent observations, so such runs are refused with a pointer back to `drop_exact` (the historical default, unchanged). Every `split_summary.json` now also reports `content_overlap` (identical rows appearing in more than one split; 0 for `drop_exact`).
+
+The declared `--source` is recorded, not authenticated: a Kaggle-shaped CSV is a *declared-source* run. Only a run whose dataset SHA-256 equals the documented `76274b691b16a6c49d3f159c883398e03ccd6d1ee12d9d8ee38f4b4b98551a89`, with the Kaggle feature schema, the historical configuration and passing comparison checks against `output/analysis/`, is labelled a historical reproduction in the UI and its exports (see [docs/ui_guide.md](docs/ui_guide.md), *Provenance labels*).
 
 `python -m fraud_pipeline ...` is equivalent to `fraud-pipeline ...`.
 
 ### 7. Local interface (optional)
 
 ```bash
-streamlit run src/fraud_pipeline/ui/app.py
+streamlit run src/fraud_pipeline/ui/app.py --server.address 127.0.0.1 --browser.gatherUsageStats false
 ```
 
-A local Streamlit interface with three non-overlapping modes: **Historical Results** (the committed artifacts above, with their missing provenance listed), **Synthetic Demo** (a run on a generated fixture, trained once and clearly labelled synthetic) and **Reproduced Experiment** (a verified `output/runs/<run_id>` with its manifest). It offers a validation-only threshold explorer with review-capacity scenarios, a frozen test-result display, a simulated review queue with analyst annotations kept apart from labels, an optional hypothetical cost scenario, and report/configuration exports. See [docs/ui_guide.md](docs/ui_guide.md), the [model card](docs/model_card.md) and the [example synthetic report](docs/example_report_synthetic.md).
+A local Streamlit interface (loopback binding and disabled usage statistics are set in `.streamlit/config.toml` and repeated as flags; see [docs/ui_guide.md](docs/ui_guide.md) for what is enforced versus observed) with three non-overlapping modes: **Historical Results** (the committed artifacts above, with their missing provenance listed), **Synthetic Demo** (a run on a generated fixture, trained once and clearly labelled synthetic) and **Reproduced Experiment** (a verified `output/runs/<run_id>` with its manifest). It offers a validation-only threshold explorer with review-capacity scenarios, a frozen test-result display, a simulated review queue with analyst annotations kept apart from labels, an optional hypothetical cost scenario, and report/configuration exports. See [docs/ui_guide.md](docs/ui_guide.md), the [model card](docs/model_card.md) and the [example synthetic report](docs/example_report_synthetic.md).
 
 <p align="center">
   <img src="docs/screenshots/reproduced_threshold_explorer.png" width="70%" alt="Threshold explorer on validation predictions of the reproduced run">
@@ -241,8 +246,8 @@ A local Streamlit interface with three non-overlapping modes: **Historical Resul
 
 | Item | Status |
 |---|---|
-| Synthetic tests and CI | Passing (105 tests, including UI core and headless app tests) |
-| Full Kaggle reproduction (`reproduce-historical`) | Completed locally on 2026-09-27 against `creditcard.csv` with SHA-256 `76274b69…551a89`, Python 3.13.14, scikit-learn 1.9.0. Thresholds (LR 0.9999999496924593, RF 0.6735057931524799), validation Average Precision, test confusion matrices, split sizes, duplicate counts (1,081) and Random Forest feature importances are identical to `output/analysis/`. The run directory is not committed (`output/runs/` is git-ignored) |
+| Synthetic tests and CI | Passing locally on Python 3.13.14 (see `pytest -q`); CI matrix runs 3.12 and 3.13 |
+| Full Kaggle reproduction (`reproduce-historical`) | Run on 2026-09-27 and re-run on 2026-09-28 (`output/runs/historical_reproduction_2026-09-28_review`, source commit `75b33cc` with uncommitted repair changes, Python 3.13.14, scikit-learn 1.9.0, numpy 2.3.2, pandas 2.3.2) against `creditcard.csv` with SHA-256 `76274b691b16a6c49d3f159c883398e03ccd6d1ee12d9d8ee38f4b4b98551a89`. Exact (not approximate) equality with `output/analysis/` for: duplicate count (1,081), cleaned class counts, split sizes and zero overlap, selected model (Random Forest), validation Average Precision of all three models, thresholds (LR 0.9999999496924593, RF 0.6735057931524799), every historical column of `model_comparison.csv` including confusion counts, all Random Forest feature importances, and the selected-model test metrics. The new run adds the `pr_auc_trapezoidal` column and a linear-spec file; its manifest necessarily differs in timestamps, paths and commit state. Run directories are git-ignored, so a third party must repeat the command to check this independently |
 
 ## Repository structure
 

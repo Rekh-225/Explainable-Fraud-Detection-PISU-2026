@@ -5,7 +5,7 @@
 - **Selected model:** Random Forest (200 trees, max depth 12, min leaf 2, `sqrt` features, `balanced_subsample` class weight, seed 42), chosen over a class-weighted Logistic Regression by validation Average Precision (0.871 vs 0.814). A Dummy Prior classifier is the no-skill reference.
 - **Operating threshold:** 0.6735 on the Random Forest score, selected on the validation split as the highest-precision threshold with validation recall >= 80% (ties -> highest threshold). Decision rule: `score >= threshold`.
 - **Outputs:** uncalibrated scores in [0, 1]. They are not probabilities of fraud and were not calibrated.
-- **Code:** `fraud_pipeline` (this repository). Historical run July 2026; bit-identical reproduction 2026-09-27 (see README, *Reproduction status*).
+- **Code:** `fraud_pipeline` (this repository). Historical run July 2026; reproductions on 2026-09-27 and 2026-09-28 matched every compared value exactly (see README, *Reproduction status*). Run directories are local and git-ignored; independent verification requires re-running against the Kaggle CSV.
 
 ## Data
 
@@ -47,7 +47,7 @@ Offline academic study of rare-event classification, threshold selection and hon
 ## Provenance
 
 - Historical artifacts (`output/analysis/`) have no run manifest, dataset checksum, environment record or row-level predictions; the UI's Historical mode lists these gaps.
-- Runs produced with `fraud-pipeline reproduce-historical` carry a full manifest (dataset SHA-256, feature order, split fingerprints, model parameters, package versions, code commit, artifact checksums) and can be opened in Reproduced Experiment mode after verification.
+- Runs produced with `fraud-pipeline reproduce-historical` carry a full manifest (dataset SHA-256, feature order, split fingerprints, model parameters, package versions, code commit, artifact checksums) and can be opened in Reproduced Experiment mode after verification. Verification establishes integrity of the directory, not the trustworthiness of whoever produced it; the UI reads only tables, JSON and images and never unpickles the saved model. A run is labelled a *historical reproduction* only when its dataset digest, feature schema and configuration match the historical experiment and its results equal the frozen artifacts; any other Kaggle-declared run is shown as a declared-source run whose dataset identity is not verified.
 
 ## Pending full-data checks
 

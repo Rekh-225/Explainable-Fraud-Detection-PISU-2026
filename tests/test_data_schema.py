@@ -150,6 +150,7 @@ def test_keep_policy_retains_duplicates(tmp_path):
     frame = make_synthetic_frame(n_rows=300, seed=5, n_duplicates=17)
     dataset = load_dataset(write_csv(tmp_path, frame), "kaggle", duplicate_policy="keep")
     assert dataset.info.duplicates_removed == 0
+    assert dataset.info.duplicates_retained == 17
     assert dataset.info.rows == 317
 
 
@@ -158,8 +159,8 @@ def test_rows_with_conflicting_labels_are_not_duplicates(synthetic_frame):
     twin = frame.iloc[[0]].copy()
     twin[LABEL_COLUMN] = 1 - twin[LABEL_COLUMN]
     frame = pd.concat([frame, twin], ignore_index=True)
-    deduped, removed = deduplicate(frame, "drop_exact")
-    assert removed == 0 and len(deduped) == len(frame)
+    deduped, removed, retained = deduplicate(frame, "drop_exact")
+    assert removed == 0 and retained == 0 and len(deduped) == len(frame)
 
 
 def test_unknown_duplicate_policy_is_rejected(synthetic_frame):

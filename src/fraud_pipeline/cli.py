@@ -17,13 +17,29 @@ from pathlib import Path
 
 from .manifest import json_ready, verify_run
 from .modeling import ModelConfig
-from .pipeline import DEFAULT_OUTPUT_ROOT, HISTORICAL_KAGGLE_CSV, RunConfig, run_pipeline
+from .data import DEFAULT_MAX_DATASET_BYTES, DEFAULT_MAX_DATASET_ROWS, DatasetTooLargeError
+from .pipeline import REQUIRED_RUN_FILES, RunConfig, run_pipeline
+from .workspace import ROOT_ENV_VAR, historical_kaggle_csv, workspace_root
 from .synthetic import write_synthetic_csv
 
 
 def _add_run_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
-    parser.add_argument("--run-id", default=None, help="Defaults to <utc-stamp>_<source>_<sha8>")
+    parser.add_argument(
+        "--workspace-root", type=Path, default=None,
+        help=f"Project root for default paths (default: ${ROOT_ENV_VAR} or the current directory)",
+    )
+    parser.add_argument(
+        "--output-root", type=Path, default=None,
+        help="Where run directories are written (default: <workspace-root>/output/runs)",
+    )
+    parser.add_argument(
+        "--run-id", default=None,
+        help="Single filename-safe component [A-Za-z0-9._-]; defaults to <utc-stamp>_<source>_<sha8>",
+    )
+    parser.add_argument("--max-dataset-bytes", type=int, default=DEFAULT_MAX_DATASET_BYTES,
+                        help="Refuse datasets larger than this before parsing")
+    parser.add_argument("--max-dataset-rows", type=int, default=DEFAULT_MAX_DATASET_ROWS,
+                        help="Stop parsing and refuse datasets with more rows than this")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--minimum-recall", type=float, default=0.80)
     parser.add_argument("--duplicate-policy", choices=["drop_exact", "keep"], default="drop_exact")
@@ -42,6 +58,9 @@ def _run_config(args: argparse.Namespace, dataset: Path, source: str) -> RunConf
         duplicate_policy=args.duplicate_policy,
         model=ModelConfig(seed=args.seed, rf_n_estimators=args.rf_estimators),
         figures=not args.no_figures,
+        workspace_root=args.workspace_root,
+        max_dataset_bytes=args.max_dataset_bytes,
+        max_dataset_rows=args.max_dataset_rows,
     )
 
 
@@ -58,7 +77,10 @@ def build_parser() -> argparse.ArgumentParser:
         "reproduce-historical",
         help="Re-run the original experiment (Kaggle CSV, seed 42, 64/16/20, 200 trees)",
     )
-    hist.add_argument("--dataset", type=Path, default=HISTORICAL_KAGGLE_CSV)
+    hist.add_argument(
+        "--dataset", type=Path, default=None,
+        help="Kaggle creditcard.csv (default: <workspace-root>/data/raw/creditcardfraud/creditcard.csv)",
+    )
     _add_run_options(hist)
 
     syn = sub.add_parser("synthetic", help="Write a deterministic synthetic fixture CSV")
@@ -90,25 +112,31 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "verify-run":
-        report = verify_run(args.run_dir)
+        report = verify_run(args.run_dir, required=REQUIRED_RUN_FILES)
         print(json.dumps(report, indent=2))
-        return 0 if not any(report.values()) else 1
+        return 0 if not any(report[k] for k in ("missing", "modified", "unlisted_required")) else 1
 
     if args.command == "run":
         config = _run_config(args, args.dataset, args.source)
     else:
-        if not args.dataset.is_file():
+        dataset = args.dataset or historical_kaggle_csv(args.workspace_root)
+        if not dataset.is_file():
             print(
-                f"Historical dataset not found at {args.dataset}. Download creditcard.csv from "
+                f"Historical dataset not found at {dataset} (workspace root "
+                f"{workspace_root(args.workspace_root)}). Download creditcard.csv from "
                 "https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud (login required) and "
                 "place it there, or pass --dataset. The OpenML mirror is NOT substituted "
                 "automatically because it omits the Time feature.",
                 file=sys.stderr,
             )
             return 2
-        config = _run_config(args, args.dataset, "kaggle")
+        config = _run_config(args, dataset, "kaggle")
 
-    result = run_pipeline(config)
+    try:
+        result = run_pipeline(config)
+    except (DatasetTooLargeError, ValueError, FileExistsError, FileNotFoundError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     summary = {
         "run_id": result.run_id,
         "run_dir": str(result.run_dir),

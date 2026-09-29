@@ -2,7 +2,7 @@
 
 > **SYNTHETIC DATA.** Every number in this report comes from a generated fixture. None of it describes the historical experiment or real transactions.
 
-Generated 2026-09-28T13:42:51+00:00 UTC by fraud_pipeline UI 0.2.0.
+Generated 2026-09-28T21:44:13+00:00 UTC by fraud_pipeline UI 0.2.1.
 
 ## Data
 
@@ -61,9 +61,9 @@ Annotations are stored separately from dataset labels and do not retrain the mod
 ## Provenance
 
 - run_id: synthetic_demo_rows6000_seed2026
-- pipeline_version: 0.2.0
+- pipeline_version: 0.2.1
 - dataset sha256: d0d6bcb1c5242f89b28bcba17e8037654304ff2a0c402e6f4fec520d5346deca
-- code commit: b78a7f7c5cbccff27f7230f7e9cb6ad6040ac4ed
+- code commit: 75b33cca8d458aa0b5d45dfefdcf1c3afb41b838
 - environment: Python 3.13.14, {'pandas': '2.3.2', 'numpy': '2.3.2', 'scikit-learn': '1.9.0', 'matplotlib': '3.11.0', 'seaborn': '0.13.2', 'joblib': '1.5.3'}
 
 ## Limitations

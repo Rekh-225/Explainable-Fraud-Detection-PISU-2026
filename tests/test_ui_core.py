@@ -51,7 +51,8 @@ def test_load_run_reports_synthetic_and_models(demo):
     assert demo.is_synthetic and demo.source == "synthetic"
     assert set(demo.scored_models) == {"Logistic Regression", "Random Forest"}
     assert demo.selected_threshold == demo.threshold_for(demo.selected_model)
-    assert demo.verification == {"missing": [], "unexpected": [], "modified": []}
+    assert demo.verification == {"missing": [], "unexpected": [], "modified": [], "unlisted_required": []}
+    assert demo.verified
 
 
 def test_reproduced_mode_refuses_synthetic_run(demo):
@@ -125,20 +126,42 @@ def test_dataset_rows_are_checksum_verified(demo, tmp_path):
     assert list(rows.columns) == demo.manifest["features"] and len(rows) == 3
     copy = tmp_path / "copy"
     shutil.copytree(demo.run_dir, copy)
-    manifest = load_manifest(copy)
-    manifest["dataset"]["sha256"] = "0" * 64
-    save_json(copy / MANIFEST_NAME, manifest)
+
+    def _set_dataset_sha(value: str) -> None:
+        # Keep manifest and data_quality.json consistent so only the *file* check can fail.
+        dq = json.loads((copy / "data_quality.json").read_text(encoding="utf-8"))
+        dq["sha256"] = value
+        (copy / "data_quality.json").write_text(json.dumps(dq), encoding="utf-8")
+        manifest = load_manifest(copy)
+        manifest["dataset"]["sha256"] = value
+        manifest["artifacts"]["data_quality.json"] = core.sha256_file(copy / "data_quality.json")
+        save_json(copy / MANIFEST_NAME, manifest)
+
+    _set_dataset_sha("0" * 64)
     with pytest.raises(core.UILoadError, match="checksum differs"):
         core.load_dataset_rows(core.load_run(copy), [0])
+    manifest = load_manifest(copy)
     manifest["dataset"]["path"] = str(tmp_path / "gone.csv")
     save_json(copy / MANIFEST_NAME, manifest)
     with pytest.raises(core.UILoadError, match="not found"):
         core.load_dataset_rows(core.load_run(copy), [0])
 
 
-def test_bundle_loads_only_from_verified_run(demo):
-    bundle = core.load_run_bundle(demo)
-    assert bundle.run_id == demo.run_id and bundle.features == demo.manifest["features"]
+def test_inconsistent_dataset_checksum_between_files_is_rejected(demo, tmp_path):
+    copy = tmp_path / "copy"
+    shutil.copytree(demo.run_dir, copy)
+    manifest = load_manifest(copy)
+    manifest["dataset"]["sha256"] = "0" * 64
+    save_json(copy / MANIFEST_NAME, manifest)
+    with pytest.raises(core.UILoadError, match="disagree on the dataset checksum"):
+        core.load_run(copy)
+
+
+def test_ui_core_exposes_no_joblib_loader(demo):
+    assert not hasattr(core, "load_run_bundle")
+    assert "joblib" not in {m.__name__ for m in vars(core).values() if hasattr(m, "__name__") and hasattr(m, "__file__")}
+    spec = core.load_linear_explainer(demo)
+    assert spec.features == demo.manifest["features"] and spec.run_id == demo.run_id
 
 
 # --- historical ---------------------------------------------------------------
@@ -207,6 +230,15 @@ def test_threshold_curve_alert_counts(demo):
     assert curve["alerts"].is_monotonic_decreasing
 
 
+def test_capacity_scenarios_empty_input_yields_structured_empty_table(demo):
+    y, s = _labels_scores(demo, "Random Forest")
+    table = core.capacity_scenarios("Random Forest", y, s, core.parse_capacities("   ", len(y)))
+    assert len(table) == 0
+    assert list(table.columns[: len(core.CAPACITY_COLUMNS)]) == core.CAPACITY_COLUMNS
+    assert table[core.CAPACITY_COLUMNS].empty  # the UI's column selection no longer raises KeyError
+    assert table.attrs["model"] == "Random Forest"
+
+
 def test_capacity_scenarios(demo):
     y, s = _labels_scores(demo, "Random Forest")
     table = core.capacity_scenarios("Random Forest", y, s, [1, 5, 20, 10_000])
@@ -226,10 +258,11 @@ def test_capacity_with_ties_reports_realised_alerts():
 
 def test_parse_capacities():
     assert core.parse_capacities("10, 5;5, 200", maximum=100) == [5, 10, 100]
-    with pytest.raises(ValueError):
-        core.parse_capacities("10, -1", 100)
-    with pytest.raises(ValueError):
-        core.parse_capacities("ten", 100)
+    assert core.parse_capacities("", 100) == [] and core.parse_capacities("  , ;", 100) == []
+    assert core.parse_capacities(" 7 ,\n 3", 100) == [3, 7]
+    for bad in ("10, -1", "ten", "0", "1.5", "1e3", "5 5", "\u0663"):
+        with pytest.raises(ValueError, match="positive whole numbers"):
+            core.parse_capacities(bad, 100)
 
 
 # --- cost scenario --------------------------------------------------------------
@@ -295,24 +328,37 @@ def test_annotations_stay_separate_from_ground_truth(demo):
     assert core.GROUND_TRUTH_COLUMN not in frame.columns
 
 
-def test_linear_contributions_only_for_logistic_pipeline(demo):
-    from fraud_pipeline.artifacts import ModelBundle
-    from fraud_pipeline.modeling import LOGISTIC_MODEL, FOREST_MODEL, build_models
+def test_linear_contributions_match_fitted_logistic_regression(demo):
+    """Reconstructed log-odds from the exported numeric spec equal the fitted model's decision_function."""
+    from fraud_pipeline.modeling import LOGISTIC_MODEL, ModelConfig, build_models
+    from fraud_pipeline.splitting import split_dataset
+    from fraud_pipeline.data import load_dataset
 
-    rows = core.load_dataset_rows(demo, [0, 1])
-    frame = pd.read_csv(demo.dataset_path())
-    X = frame[demo.manifest["features"]]
-    y = frame["Class"]
-    lr = build_models(ModelConfig(seed=0))[LOGISTIC_MODEL].fit(X, y)
-    bundle = ModelBundle(lr, LOGISTIC_MODEL, 0.5, demo.manifest["features"], "x")
-    contributions = core.linear_contributions(bundle, rows.iloc[0])
-    assert set(contributions["feature"]) == set(demo.manifest["features"])
-    assert (contributions["description"].head(50).isin(["anonymized PCA component", "time", "amount"])).all()
-    logit = lr.decision_function(rows.iloc[[0]])[0]
-    assert contributions.attrs["log_odds"] == pytest.approx(logit)
-    rf = build_models(ModelConfig(seed=0, rf_n_estimators=3))[FOREST_MODEL].fit(X, y)
-    with pytest.raises(NotImplementedError, match="Logistic Regression"):
-        core.linear_contributions(ModelBundle(rf, FOREST_MODEL, 0.5, demo.manifest["features"], "x"), rows.iloc[0])
+    dataset = load_dataset(demo.dataset_path(), "synthetic")
+    splits = split_dataset(dataset.X, dataset.y, seed=demo.manifest["config"]["seed"])
+    lr = build_models(ModelConfig(seed=demo.manifest["config"]["seed"]))[LOGISTIC_MODEL].fit(splits.train.X, splits.train.y)
+    spec = core.load_linear_explainer(demo)
+    rows = core.load_dataset_rows(demo, demo.validation_scores["row_id"].head(5).tolist())
+    for row_id, row in rows.iterrows():
+        contributions = core.linear_contributions(spec, row)
+        assert contributions.attrs["log_odds"] == pytest.approx(lr.decision_function(rows.loc[[row_id]])[0], abs=1e-9)
+        displayed = demo.validation_scores.set_index("row_id").loc[row_id, core.score_column(LOGISTIC_MODEL)]
+        assert contributions.attrs["score"] == pytest.approx(displayed, abs=1e-9)
+        assert set(contributions["feature"]) == set(demo.manifest["features"])
+        assert contributions["description"].isin(["anonymized PCA component", "time", "amount"]).all()
+    assert contributions.attrs["model"] == LOGISTIC_MODEL
+
+
+def test_explanation_availability_is_bound_to_displayed_model(demo):
+    ok, message = core.explanation_availability(demo, "Random Forest")
+    assert not ok and "Random Forest" in message and "not a causal explanation" in message
+    ok, message = core.explanation_availability(demo, "Logistic Regression")
+    assert ok
+    demo_without = core.LoadedRun(**{**demo.__dict__, "linear_spec_path": None})
+    ok, message = core.explanation_availability(demo_without, "Logistic Regression")
+    assert not ok and "re-run the pipeline" in message
+    with pytest.raises(core.UILoadError, match="no verified"):
+        core.load_linear_explainer(demo_without)
 
 
 # --- exports ---------------------------------------------------------------------

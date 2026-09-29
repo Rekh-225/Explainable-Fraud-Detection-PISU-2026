@@ -31,6 +31,16 @@ ROW_ID_COLUMN = "row_id"
 Source = Literal["kaggle", "openml", "synthetic"]
 DuplicatePolicy = Literal["drop_exact", "keep"]
 
+# Resource limits applied *before* the CSV is parsed (size) and *while* it is
+# parsed (rows). The defaults comfortably cover the Kaggle release
+# (~150 MB, 284,807 rows) and can be raised per call / via the CLI.
+DEFAULT_MAX_DATASET_BYTES = 2 * 1024 * 1024 * 1024
+DEFAULT_MAX_DATASET_ROWS = 5_000_000
+
+
+class DatasetTooLargeError(ValueError):
+    """Raised when a dataset exceeds the configured byte or row limit."""
+
 SOURCE_DESCRIPTIONS: dict[str, str] = {
     "kaggle": (
         "ULB Credit Card Fraud dataset, authoritative Kaggle release "
@@ -65,6 +75,7 @@ class DatasetInfo:
     missing_values: int
     duplicate_policy: str
     duplicates_removed: int
+    duplicates_retained: int
     rows: int
     class_counts: dict[int, int]
     fraud_prevalence: float
@@ -185,43 +196,58 @@ def validate_frame(frame: pd.DataFrame, source: str) -> tuple[pd.DataFrame, list
     return clean, features, ignored
 
 
-def deduplicate(frame: pd.DataFrame, policy: DuplicatePolicy) -> tuple[pd.DataFrame, int]:
-    """Apply the duplicate policy and return ``(frame, rows_removed)``.
+def deduplicate(frame: pd.DataFrame, policy: DuplicatePolicy) -> tuple[pd.DataFrame, int, int]:
+    """Apply the duplicate policy and return ``(frame, rows_removed, rows_retained)``.
 
     ``drop_exact`` removes rows whose *entire* row (all features and the
     label) is identical to an earlier row, keeping the first occurrence. Rows
     that share features but disagree on ``Class`` are not duplicates and are
     kept. This is the policy used by the historical experiment (1,081 rows
-    removed from the Kaggle release). ``keep`` performs no removal.
+    removed from the Kaggle release). ``keep`` performs no removal but still
+    reports how many exact duplicates remain so callers can refuse to
+    evaluate a split that would treat identical rows as independent.
     """
-    if policy == "keep":
-        return frame, 0
-    if policy != "drop_exact":
+    if policy not in ("drop_exact", "keep"):
         raise ValueError(f"Unknown duplicate policy {policy!r}")
     mask = frame.duplicated(keep="first")
-    return frame.loc[~mask], int(mask.sum())
+    duplicates = int(mask.sum())
+    if policy == "keep":
+        return frame, 0, duplicates
+    return frame.loc[~mask], duplicates, 0
 
 
 def load_dataset(
     path: str | Path,
     source: Source,
     duplicate_policy: DuplicatePolicy = "drop_exact",
+    max_bytes: int = DEFAULT_MAX_DATASET_BYTES,
+    max_rows: int = DEFAULT_MAX_DATASET_ROWS,
 ) -> Dataset:
     """Load and validate a CSV dataset from an explicit path and declared source.
 
-    The resulting frame is indexed by ``row_id`` = 0-based position of the row
-    in the CSV, which stays stable through de-duplication and splitting.
+    The file size is checked against ``max_bytes`` before parsing and the
+    parser stops after ``max_rows + 1`` rows, so an oversized input fails with
+    :class:`DatasetTooLargeError` instead of exhausting memory. The resulting
+    frame is indexed by ``row_id`` = 0-based position of the row in the CSV,
+    which stays stable through de-duplication and splitting. ``info.path`` is
+    the absolute, resolved location.
     """
-    path = Path(path)
+    path = Path(path).expanduser()
     if not path.is_file():
         raise FileNotFoundError(f"Dataset file not found: {path}")
+    path = path.resolve()
+    size = path.stat().st_size
+    if size > max_bytes:
+        raise DatasetTooLargeError(f"Dataset is {size:,} bytes, above the limit of {max_bytes:,} bytes")
 
-    raw = pd.read_csv(path)
+    raw = pd.read_csv(path, nrows=max_rows + 1)
+    if len(raw) > max_rows:
+        raise DatasetTooLargeError(f"Dataset has more than {max_rows:,} rows (limit {max_rows:,})")
     raw.index = pd.RangeIndex(len(raw), name=ROW_ID_COLUMN)
     clean, features, ignored = validate_frame(raw, source)
 
     raw_counts = _class_counts(clean[LABEL_COLUMN])
-    deduped, removed = deduplicate(clean, duplicate_policy)
+    deduped, removed, retained = deduplicate(clean, duplicate_policy)
     counts = _class_counts(deduped[LABEL_COLUMN])
     if sorted(counts) != [0, 1]:
         raise SchemaError(f"Both classes must survive de-duplication; found {sorted(counts)}")
@@ -240,6 +266,7 @@ def load_dataset(
         missing_values=int(raw[features + [LABEL_COLUMN]].isna().sum().sum()),
         duplicate_policy=duplicate_policy,
         duplicates_removed=removed,
+        duplicates_retained=retained,
         rows=int(len(deduped)),
         class_counts=counts,
         fraud_prevalence=float(deduped[LABEL_COLUMN].mean()),

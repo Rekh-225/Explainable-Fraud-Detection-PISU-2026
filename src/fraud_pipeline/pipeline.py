@@ -20,14 +20,15 @@ import numpy as np
 import pandas as pd
 
 from . import reporting
-from .artifacts import save_model_bundle
-from .data import Dataset, DuplicatePolicy, Source, load_dataset
+from .artifacts import LINEAR_SPEC_FILENAME, MODEL_DIRNAME, export_linear_spec, save_model_bundle
+from .data import DEFAULT_MAX_DATASET_BYTES, DEFAULT_MAX_DATASET_ROWS, Dataset, DuplicatePolicy, Source, load_dataset
 from .evaluation import evaluate_scores, ranking_metrics
 from .manifest import build_manifest, save_json, write_manifest
 from .modeling import (
     DUMMY_MODEL,
     FOREST_MODEL,
     LEARNED_MODELS,
+    LOGISTIC_MODEL,
     ModelConfig,
     build_models,
     describe_model,
@@ -35,24 +36,38 @@ from .modeling import (
     positive_scores,
 )
 from .splitting import SplitResult, split_dataset
+from .workspace import contained_run_dir, default_output_root, workspace_root
 from .thresholds import COMPARISON, TIE_BREAK, ThresholdDecision, select_operating_threshold
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "output" / "runs"
-HISTORICAL_KAGGLE_CSV = PROJECT_ROOT / "data" / "raw" / "creditcardfraud" / "creditcard.csv"
 PROJECT_TITLE = (
     "Explainable AI-Powered Fraud Detection and Risk Analytics for Digital Payment Transactions"
 )
 DUMMY_THRESHOLD = 0.5
 DEFAULT_POLICY = "default_0.5"
 OPERATING_POLICY = "validation_operating_point"
+# Files every consumer (CLI verify-run, UI) expects a run to contain and list in its manifest.
+REQUIRED_RUN_FILES = (
+    "analysis_summary.json",
+    "data_quality.json",
+    "model_comparison.csv",
+    "split_summary.json",
+    "validation_summary.json",
+    "feature_importance.csv",
+    "validation_scores.csv",
+)
 
 
 @dataclass(frozen=True)
 class RunConfig:
+    """Run settings. ``output_root=None`` resolves to ``<workspace>/output/runs`` at run time.
+
+    The workspace is ``workspace_root`` if given, else ``$FRAUD_PIPELINE_ROOT``,
+    else the current working directory - never the installed package location.
+    """
+
     dataset_path: Path
     source: Source
-    output_root: Path = DEFAULT_OUTPUT_ROOT
+    output_root: Path | None = None
     run_id: str | None = None
     seed: int = 42
     test_size: float = 0.20
@@ -61,11 +76,20 @@ class RunConfig:
     duplicate_policy: DuplicatePolicy = "drop_exact"
     model: ModelConfig = field(default_factory=ModelConfig)
     figures: bool = True
+    workspace_root: Path | None = None
+    max_dataset_bytes: int = DEFAULT_MAX_DATASET_BYTES
+    max_dataset_rows: int = DEFAULT_MAX_DATASET_ROWS
+
+    def resolved_output_root(self) -> Path:
+        if self.output_root is not None:
+            return Path(self.output_root).expanduser().resolve()
+        return default_output_root(self.workspace_root)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
-        payload["dataset_path"] = str(self.dataset_path)
-        payload["output_root"] = str(self.output_root)
+        payload["dataset_path"] = str(Path(self.dataset_path).expanduser().resolve())
+        payload["output_root"] = str(self.resolved_output_root())
+        payload["workspace_root"] = str(workspace_root(self.workspace_root))
         return payload
 
 
@@ -87,7 +111,8 @@ def make_run_id(source: str, dataset_sha256: str, now: datetime | None = None) -
 
 
 def prepare_run_dir(output_root: Path, run_id: str) -> Path:
-    run_dir = output_root / run_id
+    """Create ``output_root/run_id`` after validating the id and its containment."""
+    run_dir = contained_run_dir(output_root, run_id)
     if run_dir.exists() and any(run_dir.iterdir()):
         raise FileExistsError(
             f"Run directory {run_dir} already exists and is not empty; runs are never overwritten"
@@ -126,9 +151,23 @@ def data_quality_summary(dataset: Dataset) -> dict[str, Any]:
 
 
 def run_pipeline(config: RunConfig) -> RunResult:
-    dataset = load_dataset(config.dataset_path, config.source, config.duplicate_policy)
+    dataset = load_dataset(
+        config.dataset_path,
+        config.source,
+        config.duplicate_policy,
+        max_bytes=config.max_dataset_bytes,
+        max_rows=config.max_dataset_rows,
+    )
+    if dataset.info.duplicates_retained:
+        # Exact duplicates kept in the data would be split across train/validation/test and
+        # then scored as if independent, which makes every evaluation optimistic.
+        raise ValueError(
+            f"duplicate_policy='keep' retained {dataset.info.duplicates_retained} exact duplicate rows. "
+            "An evaluated run cannot treat identical observations in different splits as independent; "
+            "use duplicate_policy='drop_exact' (the historical default) or remove the duplicates from the input."
+        )
     run_id = config.run_id or make_run_id(config.source, dataset.info.sha256)
-    run_dir = prepare_run_dir(Path(config.output_root), run_id)
+    run_dir = prepare_run_dir(config.resolved_output_root(), run_id)
     figure_dir = run_dir / "figures"
 
     save_json(run_dir / "data_quality.json", data_quality_summary(dataset))
@@ -239,11 +278,17 @@ def run_pipeline(config: RunConfig) -> RunResult:
     save_json(run_dir / "analysis_summary.json", summary)
 
     save_model_bundle(run_dir, models[selected], selected, thresholds[selected], dataset.features, run_id)
+    # Non-executable numeric description of the Logistic Regression pipeline for local
+    # explanations in the UI (the joblib bundle above is never loaded by the UI).
+    export_linear_spec(
+        models[LOGISTIC_MODEL], LOGISTIC_MODEL, dataset.features, run_id,
+        run_dir / MODEL_DIRNAME / LINEAR_SPEC_FILENAME,
+    )
 
     manifest = build_manifest(
         run_id=run_id,
         run_dir=run_dir,
-        repo_root=PROJECT_ROOT,
+        repo_root=workspace_root(config.workspace_root),
         dataset={
             "path": dataset.info.path,
             "source": dataset.info.source,
@@ -262,6 +307,7 @@ def run_pipeline(config: RunConfig) -> RunResult:
             "policy": dataset.info.duplicate_policy,
             "definition": "exact match on all retained feature columns and Class; first occurrence kept",
             "rows_removed": dataset.info.duplicates_removed,
+            "rows_retained": dataset.info.duplicates_retained,
         },
         split=split_summary,
         models={name: describe_model(model) for name, model in models.items()},

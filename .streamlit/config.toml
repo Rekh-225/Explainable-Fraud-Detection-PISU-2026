@@ -1,0 +1,29 @@
+# Project-level Streamlit configuration for the local UI.
+# Precedence (highest first): command-line flags > STREAMLIT_* environment
+# variables > this file > ~/.streamlit/config.toml > Streamlit defaults.
+# The documented launch command repeats the two privacy-relevant settings as
+# flags so that a user-level config file cannot silently override them.
+
+[browser]
+# Do not send usage statistics to Streamlit.
+gatherUsageStats = false
+serverAddress = "127.0.0.1"
+
+[server]
+# Loopback only: not reachable from other machines on the network.
+address = "127.0.0.1"
+port = 8501
+headless = true
+enableCORS = true
+enableXsrfProtection = true
+# Local artifacts only; the UI has no upload widget, so keep the limit small.
+maxUploadSize = 1
+fileWatcherType = "none"
+
+[client]
+# Hide the "Deploy" button and developer toolbar (links to Streamlit Cloud).
+toolbarMode = "viewer"
+showErrorDetails = "full"
+
+[theme]
+base = "light"

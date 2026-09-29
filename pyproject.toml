@@ -4,11 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fraud-pipeline"
-version = "0.2.0"
+version = "0.2.1"
 description = "Reproducible, testable fraud-detection analysis pipeline for the PISU 2026 report."
 requires-python = ">=3.12"
-# Runtime dependencies are pinned in requirements.txt (repository convention).
-dependencies = []
+# Core runtime dependencies. Pins mirror requirements.txt (tests/test_packaging.py
+# checks that the two stay identical).
+dependencies = [
+    "pandas==2.3.2",
+    "numpy==2.3.2",
+    "scikit-learn==1.9.0",
+    "matplotlib==3.11.0",
+    "seaborn==0.13.2",
+    "joblib==1.5.3",
+]
+
+[project.optional-dependencies]
+# Local Streamlit interface (requirements-ui.txt).
+ui = ["streamlit==1.63.0"]
+# Test tooling (requirements-dev.txt = core + ui + dev).
+dev = ["pytest==8.4.2"]
 
 [project.scripts]
 fraud-pipeline = "fraud_pipeline.cli:main"
